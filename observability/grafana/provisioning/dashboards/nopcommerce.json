@@ -1,0 +1,140 @@
+{
+  "title": "nopCommerce — Search & Product View",
+  "uid": "nopcommerce-search",
+  "tags": ["nopcommerce"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "refresh": "10s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Search Result Count — Distribution (p50 / p95)",
+      "description": "How many products searches return. A drop toward zero means the catalog has a silent availability problem.",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(nopcommerce_catalog_search_result_count_bucket[2m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(nopcommerce_catalog_search_result_count_bucket[2m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 2 }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Zero-Result Searches / min",
+      "description": "Searches that returned 0 products. A spike here means customers can't find anything.",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(nopcommerce_catalog_search_result_count_bucket{le=\"0\"}[2m])) * 60",
+          "legendFormat": "zero-result searches"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "fixed", "fixedColor": "orange" },
+          "custom": { "lineWidth": 2 }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Price Calculations — Discount Applied Rate",
+      "description": "Share of price calculations where a discount was applied. Should spike during active promotions. If it drops to 0 during a sale, discount config is broken.",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(nopcommerce_catalog_price_discount_calculations_total{discount_applied=\"true\"}[2m])) / sum(rate(nopcommerce_catalog_price_discount_calculations_total[2m]))",
+          "legendFormat": "discount applied rate"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "custom": { "lineWidth": 2 }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "HTTP Error Rate (5xx) — Search & Product Pages",
+      "description": "5xx errors on /search and /product routes. Any sustained rate above 0 needs immediate attention.",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~\"5..\", http_route=~\".*(search|product).*\"}[2m])) * 60",
+          "legendFormat": "5xx / min"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "fixed", "fixedColor": "red" },
+          "custom": { "lineWidth": 2 }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Request Duration — Search & Product (p50 / p95)",
+      "description": "End-to-end HTTP latency for the search and product view flows.",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(http_server_request_duration_seconds_bucket{http_route=~\".*(search|product).*\"}[2m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_request_duration_seconds_bucket{http_route=~\".*(search|product).*\"}[2m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "lineWidth": 2 }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Traces — Search & Product Flow",
+      "description": "Live traces from Jaeger. Click any row to drill into span detail.",
+      "type": "traces",
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+      "datasource": { "type": "jaeger", "uid": "jaeger" },
+      "targets": [
+        {
+          "queryType": "search",
+          "service": "nopCommerce",
+          "operation": "catalog.search.products",
+          "limit": 20
+        }
+      ]
+    }
+  ],
+  "templating": { "list": [] }
+}
