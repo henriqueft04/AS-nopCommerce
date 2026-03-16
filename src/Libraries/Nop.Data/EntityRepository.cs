@@ -1,10 +1,12 @@
-﻿using System.Linq.Expressions;
+﻿using System.Diagnostics;
+using System.Linq.Expressions;
 using System.Transactions;
 using Nop.Core;
 using Nop.Core.Caching;
 using Nop.Core.Configuration;
 using Nop.Core.Domain.Common;
 using Nop.Core.Events;
+using Nop.Core.Telemetry;
 
 namespace Nop.Data;
 
@@ -127,6 +129,11 @@ public partial class EntityRepository<TEntity> : IRepository<TEntity> where TEnt
 
         async Task<TEntity> getEntityAsync()
         {
+            using var activity = NopActivitySource.Instance.StartActivity(
+                $"db.{typeof(TEntity).Name}.GetById", ActivityKind.Internal);
+            activity?.SetTag("db.entity_type", typeof(TEntity).Name);
+            activity?.SetTag("db.entity_id", id);
+
             return await AddDeletedFilter(Table, includeDeleted).FirstOrDefaultAsync(entity => entity.Id == Convert.ToInt32(id));
         }
 
@@ -342,6 +349,10 @@ public partial class EntityRepository<TEntity> : IRepository<TEntity> where TEnt
     {
         ArgumentNullException.ThrowIfNull(entity);
 
+        using var activity = NopActivitySource.Instance.StartActivity(
+            $"db.{typeof(TEntity).Name}.Insert", ActivityKind.Internal);
+        activity?.SetTag("db.entity_type", typeof(TEntity).Name);
+
         await _dataProvider.InsertEntityAsync(entity);
 
         //event notification
@@ -395,6 +406,11 @@ public partial class EntityRepository<TEntity> : IRepository<TEntity> where TEnt
     {
         ArgumentNullException.ThrowIfNull(entity);
 
+        using var activity = NopActivitySource.Instance.StartActivity(
+            $"db.{typeof(TEntity).Name}.Update", ActivityKind.Internal);
+        activity?.SetTag("db.entity_type", typeof(TEntity).Name);
+        activity?.SetTag("db.entity_id", entity.Id);
+
         await _dataProvider.UpdateEntityAsync(entity);
 
         //event notification
@@ -434,6 +450,11 @@ public partial class EntityRepository<TEntity> : IRepository<TEntity> where TEnt
     public virtual async Task DeleteAsync(TEntity entity, bool publishEvent = true)
     {
         ArgumentNullException.ThrowIfNull(entity);
+
+        using var activity = NopActivitySource.Instance.StartActivity(
+            $"db.{typeof(TEntity).Name}.Delete", ActivityKind.Internal);
+        activity?.SetTag("db.entity_type", typeof(TEntity).Name);
+        activity?.SetTag("db.entity_id", entity.Id);
 
         switch (entity)
         {

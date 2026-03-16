@@ -1,5 +1,7 @@
-﻿using System.Data.SqlTypes;
+﻿using System.Diagnostics;
+using System.Data.SqlTypes;
 using Nop.Core;
+using Nop.Core.Telemetry;
 using Nop.Core.Caching;
 using Nop.Core.Domain.Catalog;
 using Nop.Core.Domain.Customers;
@@ -829,6 +831,16 @@ public partial class ProductService : IProductService
         bool showHidden = false,
         bool? overridePublished = null)
     {
+        using var activity = NopActivitySource.Instance.StartActivity(
+            "catalog.search.products", ActivityKind.Internal);
+        // Tag the keyword presence but never the keyword value itself — search
+        // terms can contain personal names which would be PII in traces.
+        activity?.SetTag("search.has_keyword", !string.IsNullOrEmpty(keywords));
+        activity?.SetTag("search.has_category_filter", categoryIds?.Count > 0);
+        activity?.SetTag("search.has_price_filter", priceMin.HasValue || priceMax.HasValue);
+        activity?.SetTag("search.page_index", pageIndex);
+        activity?.SetTag("search.page_size", pageSize);
+
         //some databases don't support int.MaxValue
         if (pageSize == int.MaxValue)
             pageSize = int.MaxValue - 1;
@@ -1121,6 +1133,8 @@ public partial class ProductService : IProductService
             }
         }
 
+        IPagedList<Product> results;
+
         if (providerResults.Any() && orderBy == ProductSortingEnum.Position && !showHidden)
         {
             var sortedProducts = from p in productsQuery
@@ -1128,12 +1142,21 @@ public partial class ProductService : IProductService
                                  from os in orderSeq.DefaultIfEmpty()
                                  orderby os == null ? int.MaxValue : os.ind
                                  select p;
-                                 
 
-            return await sortedProducts.ToPagedListAsync(pageIndex, pageSize);
+            results = await sortedProducts.ToPagedListAsync(pageIndex, pageSize);
+        }
+        else
+        {
+            results = await productsQuery.OrderBy(_localizedPropertyRepository, await _workContext.GetWorkingLanguageAsync(), orderBy).ToPagedListAsync(pageIndex, pageSize);
         }
 
-        return await productsQuery.OrderBy(_localizedPropertyRepository, await _workContext.GetWorkingLanguageAsync(), orderBy).ToPagedListAsync(pageIndex, pageSize);
+        activity?.SetTag("search.result_count", results.TotalCount);
+        NopMetrics.SearchResultCount.Record(
+            results.TotalCount,
+            new KeyValuePair<string, object?>("has_keyword", !string.IsNullOrEmpty(keywords)),
+            new KeyValuePair<string, object?>("has_category", categoryIds?.Count > 0));
+
+        return results;
     }
 
     /// <summary>

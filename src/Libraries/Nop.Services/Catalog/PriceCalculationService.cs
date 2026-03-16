@@ -1,4 +1,6 @@
-﻿using Nop.Core.Caching;
+﻿using System.Diagnostics;
+using Nop.Core.Caching;
+using Nop.Core.Telemetry;
 using Nop.Core.Domain.Catalog;
 using Nop.Core.Domain.Customers;
 using Nop.Core.Domain.Directory;
@@ -342,6 +344,12 @@ public partial class PriceCalculationService : IPriceCalculationService
     {
         ArgumentNullException.ThrowIfNull(product);
 
+        using var activity = NopActivitySource.Instance.StartActivity(
+            "catalog.price.calculate", ActivityKind.Internal);
+        activity?.SetTag("price.product_id", product.Id);
+        activity?.SetTag("price.include_discounts", includeDiscounts);
+        activity?.SetTag("price.quantity", quantity);
+
         var cacheKey = _staticCacheManager.PrepareKeyForDefaultCache(NopCatalogDefaults.ProductPriceCacheKey,
             product,
             overriddenProductPrice,
@@ -408,6 +416,13 @@ public partial class PriceCalculationService : IPriceCalculationService
 
             return (priceWithoutDiscount, price, appliedDiscountAmount, discounts);
         });
+
+        var discountWasApplied = discountAmount > 0;
+        activity?.SetTag("price.discount_applied", discountWasApplied);
+        activity?.SetTag("price.discount_amount", discountAmount);
+
+        NopMetrics.PriceDiscountCalculations.Add(1,
+            new KeyValuePair<string, object?>("discount_applied", discountWasApplied));
 
         return (rezPriceWithoutDiscount, rezPrice, discountAmount, appliedDiscounts);
     }
