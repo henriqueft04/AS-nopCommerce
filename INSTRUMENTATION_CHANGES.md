@@ -1,8 +1,8 @@
-# Instrumentation Changes — Task 2
+# Instrumentation Changes, Task 2
 ## Flow: Customer Searches and Views a Product
 
 This document tracks every file created or modified as part of the OpenTelemetry
-instrumentation for the Catalogue · Search · Pricing flow.
+instrumentation for the Catalogue, Search, Pricing flow.
 
 ---
 
@@ -11,7 +11,7 @@ instrumentation for the Catalogue · Search · Pricing flow.
 ### `src/Libraries/Nop.Core/Telemetry/NopActivitySource.cs`
 A single static `ActivitySource` instance shared across every layer of the
 application. Lives in `Nop.Core` because that project has no outbound
-dependencies — placing it here means `Nop.Data` and `Nop.Services` can both
+dependencies, meaning `Nop.Data` and `Nop.Services` can both
 use it without adding a reference to any OTel SDK package. `ActivitySource`
 itself is part of `System.Diagnostics` in the .NET base class library, so
 no NuGet package is needed at this level.
@@ -24,7 +24,7 @@ Defines the two custom metrics for this flow using `System.Diagnostics.Metrics`
 **`catalog.search.result_count`** (Histogram)
 Records the number of products returned by each search query, tagged with
 `has_keyword` and `has_category`. A sustained shift toward zero in this
-distribution — without any HTTP errors — is an early signal that the catalog
+distribution, without any HTTP errors, is an early signal that the catalog
 has a silent availability problem (mass product deactivation, search provider
 failure, ACL misconfiguration). An operator can alert when the p50 drops below
 a threshold before customers start complaining.
@@ -45,7 +45,7 @@ other startup class. This registers the full OpenTelemetry SDK:
 - .NET runtime metrics (GC, thread pool)
 - OTLP exporter pointing at the OTel Collector
 
-No existing files are modified by this class — the `INopStartup` discovery
+No existing files are modified by this class. The `INopStartup` discovery
 mechanism picks it up automatically via reflection.
 
 ### `src/Presentation/Nop.Web.Framework/Telemetry/PiiSanitizingProcessor.cs`
@@ -59,26 +59,36 @@ instrumentation point, this single processor enforces the PII boundary
 centrally. It is registered as the last processor in the pipeline so it
 applies regardless of which exporter is used.
 
-### `src/Presentation/Nop.Web/appsettings.json`
-Configuration file for the OTel endpoint and service name, read by
-`ObservabilityStartup`. Defaults to `http://localhost:4317` (the OTel
-Collector OTLP gRPC port).
+### `src/Presentation/Nop.Web/App_Data/appsettings.json`
+OTel endpoint and service name configuration read by `ObservabilityStartup`.
+The config key is `OpenTelemetry:OtlpEndpoint`.
+
+Note: nopCommerce loads configuration exclusively from `App_Data/appsettings.json`,
+not from the standard `appsettings.json` at the project root. Placing the block
+in the wrong file causes silent fallback to defaults and no data is exported.
+
+The OTLP transport is HTTP/protobuf (port 4318), not gRPC (port 4317). gRPC
+requires the `Grpc.Net.Client` native channel to be available at runtime;
+HTTP/protobuf works without it and is more predictable across environments.
 
 ```json
 {
   "OpenTelemetry": {
     "ServiceName": "nopCommerce",
-    "OtlpEndpoint": "http://localhost:4317"
+    "OtlpEndpoint": "http://localhost:4318"
   }
 }
 ```
 
 ### `observability/docker-compose.yml`
 Brings up the full observability stack:
-- **OTel Collector** — receives OTLP from the app on port 4317, fans out to Jaeger and Prometheus
-- **Jaeger** — trace storage and UI at `http://localhost:16686`
-- **Prometheus** — scrapes metrics from the collector at `http://localhost:9090`
-- **Grafana** — dashboards at `http://localhost:3000` (admin/admin), with Prometheus and Jaeger auto-provisioned as data sources
+- **MySQL 8.4**, application database, port 3306, credentials `nop/noppassword`
+- **OTel Collector**, receives OTLP on port 4317 (gRPC) and 4318 (HTTP), fans out to Jaeger and Prometheus
+- **Jaeger**, trace storage and UI at `http://localhost:16686`
+- **Prometheus**, scrapes metrics from the collector at `http://localhost:9090`
+- **Grafana**, dashboards at `http://localhost:3000` (admin/admin), with Prometheus and Jaeger auto-provisioned as data sources
+
+The `version` field is intentionally absent (removed) because recent Docker Compose versions print an obsolete warning if it is present.
 
 ### `observability/otel-collector-config.yaml`
 OTel Collector pipeline configuration. Receives OTLP over gRPC and HTTP,
@@ -111,6 +121,11 @@ Added five OTel SDK NuGet packages:
 | `OpenTelemetry.Instrumentation.Runtime` | 1.10.0 | .NET runtime metrics (GC, threads) |
 | `OpenTelemetry.Exporter.OpenTelemetryProtocol` | 1.10.0 | OTLP export to collector |
 
+Also added `OpenTelemetry.Exporter.Console` (1.10.0) as a temporary debug
+exporter. This prints spans to stdout so it is possible to confirm the SDK
+is active without needing the collector to be reachable. It should be removed
+once the pipeline is confirmed working end-to-end.
+
 These packages only live in `Nop.Web.Framework` because that is where
 `ObservabilityStartup` lives and where the SDK is configured. No other
 project needs them.
@@ -120,35 +135,35 @@ Added `using System.Diagnostics` and `using Nop.Core.Telemetry`.
 
 Added activity spans in four places:
 
-**`GetByIdAsync`** — span created inside the `getEntityAsync` local function,
+**`GetByIdAsync`**, span created inside the `getEntityAsync` local function,
 which is only invoked on a cache miss. This means cached hits produce no span
 noise; you only see a DB span when the database is actually queried. Tags:
 `db.entity_type`, `db.entity_id`.
 
-**`InsertAsync`** — span wrapping `_dataProvider.InsertEntityAsync`. Tags:
+**`InsertAsync`**, span wrapping `_dataProvider.InsertEntityAsync`. Tags:
 `db.entity_type`.
 
-**`UpdateAsync`** — span wrapping `_dataProvider.UpdateEntityAsync`. Tags:
+**`UpdateAsync`**, span wrapping `_dataProvider.UpdateEntityAsync`. Tags:
 `db.entity_type`, `db.entity_id`.
 
-**`DeleteAsync`** — span wrapping the soft-delete or hard-delete path. Tags:
+**`DeleteAsync`**, span wrapping the soft-delete or hard-delete path. Tags:
 `db.entity_type`, `db.entity_id`.
 
-`EntityRepository<TEntity>` is the single data access choke point — all 40+
+`EntityRepository<TEntity>` is the single data access choke point; all 40+
 service domains go through it, so these four changes give DB-level visibility
 across the entire application.
 
 ### `src/Libraries/Nop.Services/Catalog/ProductService.cs`
 Added `using System.Diagnostics` and `using Nop.Core.Telemetry`.
 
-**`SearchProductsAsync`** — two changes:
+**`SearchProductsAsync`**, two changes:
 
 1. An activity span is started at the top of the method with tags:
-   - `search.has_keyword` — whether a text query was present (the keyword
-     value itself is never tagged — search terms can contain personal names)
+   - `search.has_keyword`, whether a text query was present (the keyword
+     value itself is never tagged, as search terms can contain personal names)
    - `search.has_category_filter`, `search.has_price_filter`
    - `search.page_index`, `search.page_size`
-   - `search.result_count` — set after the query executes
+   - `search.result_count`, set after the query executes
 
 2. The two `return` statements at the end of the method (one for
    plugin-sorted results, one for standard results) were merged into a single
@@ -158,13 +173,13 @@ Added `using System.Diagnostics` and `using Nop.Core.Telemetry`.
 ### `src/Libraries/Nop.Services/Catalog/PriceCalculationService.cs`
 Added `using System.Diagnostics` and `using Nop.Core.Telemetry`.
 
-**`GetFinalPriceAsync`** — two changes:
+**`GetFinalPriceAsync`**, two changes:
 
 1. An activity span is started at the top of the method with tags:
    - `price.product_id`
    - `price.include_discounts`
    - `price.quantity`
-   - `price.discount_applied` and `price.discount_amount` — set after the
+   - `price.discount_applied` and `price.discount_amount`, set after the
      cache/calculation resolves
 
 2. The `catalog.price.discount_calculations` counter is incremented before
@@ -174,18 +189,55 @@ Added `using System.Diagnostics` and `using Nop.Core.Telemetry`.
 
 ## What Was Deliberately Not Changed
 
-**`DefaultLogger.cs`** — nopCommerce's custom database logger has no relationship
+**`DefaultLogger.cs`**, nopCommerce's custom database logger has no relationship
 to `Microsoft.Extensions.Logging`, so it is invisible to the OTel log pipeline.
 Bridging it would require modifying the logger to dual-write into MEL, which is
 invasive. The traces provide enough signal for the assignment's purposes; the
 log gap is documented in the architecture analysis.
 
-**Plugin files** — payment and shipping plugins are separate assemblies.
+**Plugin files**, payment and shipping plugins are separate assemblies.
 Their internal logic is not instrumented directly. The HttpClient
 instrumentation in `ObservabilityStartup` captures the outbound network calls
 at the transport layer, which gives latency and error visibility without
 touching plugin code.
 
-**`NopStartup.cs`** — no service registrations were changed. `ObservabilityStartup`
+**`NopStartup.cs`**, no service registrations were changed. `ObservabilityStartup`
 runs at Order -5 before `NopStartup` (Order 2000), so the OTel SDK is fully
 configured before any business service is resolved.
+
+---
+
+## Bugs Fixed During Integration
+
+### Grafana metric name prefix mismatch
+The OTel Collector's Prometheus exporter is configured with `namespace: nopcommerce`,
+which prepends `nopcommerce_` to every metric name it exposes. The initial
+dashboard used bare names for standard ASP.NET Core metrics
+(`http_server_request_duration_seconds_count`) which returned no data. Fixed by
+prefixing all HTTP metric queries with `nopcommerce_`:
+
+- `http_server_request_duration_seconds_count` becomes `nopcommerce_http_server_request_duration_seconds_count`
+- `http_server_request_duration_seconds_bucket` becomes `nopcommerce_http_server_request_duration_seconds_bucket`
+
+Custom metrics (`nopcommerce_catalog_*`) were already correct because they were
+named with the prefix from the start.
+
+### gRPC OTLP not working, switched to HTTP/protobuf
+The initial exporter used gRPC on port 4317. gRPC requires a native channel
+that was not available in the runtime environment, causing silent export failures.
+Switched both the trace and metrics OTLP exporters to HTTP/protobuf on port 4318,
+which has no native dependency.
+
+### OTel config in wrong appsettings file
+The `OpenTelemetry` config block was initially placed in
+`src/Presentation/Nop.Web/appsettings.json`. nopCommerce does not load that
+file at runtime; it loads exclusively from `App_Data/appsettings.json`.
+Moved the block to the correct file.
+
+### MySQL health check using `nc` (not installed)
+The `make run` target originally checked MySQL readiness with `nc -z localhost 3306`.
+`nc` (netcat) is not installed in the environment. Replaced with the shell
+built-in TCP redirect: `bash -c 'echo > /dev/tcp/localhost/3306'`.
+
+### Duplicate `.PHONY` line in Makefile
+An edit accidentally duplicated the `.PHONY` declaration. Removed the duplicate.
