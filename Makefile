@@ -1,4 +1,4 @@
-.PHONY: all up down build run logs clean
+.PHONY: all up down build run logs collector-logs clean
 
 all: up build run
 
@@ -14,10 +14,15 @@ build:
 	cd src && dotnet restore && dotnet build --no-restore
 
 run:
-	cd src && dotnet run --project Presentation/Nop.Web/Nop.Web.csproj
+	@until bash -c 'echo > /dev/tcp/localhost/3306' 2>/dev/null; do echo "Waiting for MySQL..."; sleep 2; done
+	@echo "MySQL is up"
+	cd src && OTEL_DOTNET_AUTO_LOG_LEVEL=debug dotnet run --project Presentation/Nop.Web/Nop.Web.csproj
 
 logs:
 	docker compose -f observability/docker-compose.yml logs -f
+
+collector-logs:
+	docker compose -f observability/docker-compose.yml logs -f otel-collector
 
 clean:
 	docker compose -f observability/docker-compose.yml down -v

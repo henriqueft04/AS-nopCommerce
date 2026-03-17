@@ -17,6 +17,7 @@
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.10.1" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.10.0" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.10.0" />
+    <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.10.0" />
     <PackageReference Include="DeepL.net" Version="1.15.0" />
     <PackageReference Include="FluentValidation.AspNetCore" Version="11.3.0" />
     <PackageReference Include="Google.Cloud.Translation.V2" Version="3.4.0" />

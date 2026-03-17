@@ -4,9 +4,11 @@ using Microsoft.Extensions.DependencyInjection;
 using Nop.Core.Infrastructure;
 using Nop.Core.Telemetry;
 using Nop.Web.Framework.Telemetry;
+using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using System.Net.Http;
 
 namespace Nop.Web.Framework.Infrastructure;
 
@@ -27,6 +29,9 @@ public class ObservabilityStartup : INopStartup
 
     public void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
+        // DEBUG: remove this line once confirmed working
+        File.WriteAllText("/tmp/otel_startup_ran.txt", $"ObservabilityStartup.ConfigureServices called at {DateTime.UtcNow}");
+
         var otlpEndpoint = configuration["OpenTelemetry:OtlpEndpoint"] ?? "http://localhost:4317";
         var serviceName = configuration["OpenTelemetry:ServiceName"] ?? "nopCommerce";
 
@@ -53,9 +58,11 @@ public class ObservabilityStartup : INopStartup
                     };
                 })
                 .AddProcessor(new PiiSanitizingProcessor())
+                .AddConsoleExporter()
                 .AddOtlpExporter(options =>
                 {
-                    options.Endpoint = new Uri(otlpEndpoint);
+                    options.Endpoint = new Uri("http://localhost:4318/v1/traces");
+                    options.Protocol = OtlpExportProtocol.HttpProtobuf;
                 }))
             .WithMetrics(metrics => metrics
                 .AddMeter(NopActivitySource.Name)
@@ -64,7 +71,8 @@ public class ObservabilityStartup : INopStartup
                 .AddRuntimeInstrumentation()
                 .AddOtlpExporter(options =>
                 {
-                    options.Endpoint = new Uri(otlpEndpoint);
+                    options.Endpoint = new Uri("http://localhost:4318/v1/metrics");
+                    options.Protocol = OtlpExportProtocol.HttpProtobuf;
                 }));
     }
 
