@@ -1,4 +1,4 @@
-.PHONY: all up down build run logs collector-logs clean
+.PHONY: all up down build run logs collector-logs loadtest clean
 
 all: up build run
 
@@ -23,6 +23,10 @@ logs:
 
 collector-logs:
 	docker compose -f observability/docker-compose.yml logs -f otel-collector
+
+loadtest:
+	@echo "Running load test (120s, 20 workers)..."
+	./load-test.sh http://localhost:5000 120 20
 
 clean:
 	docker compose -f observability/docker-compose.yml down -v
