@@ -234,10 +234,3 @@ The `OpenTelemetry` config block was initially placed in
 file at runtime; it loads exclusively from `App_Data/appsettings.json`.
 Moved the block to the correct file.
 
-### MySQL health check using `nc` (not installed)
-The `make run` target originally checked MySQL readiness with `nc -z localhost 3306`.
-`nc` (netcat) is not installed in the environment. Replaced with the shell
-built-in TCP redirect: `bash -c 'echo > /dev/tcp/localhost/3306'`.
-
-### Duplicate `.PHONY` line in Makefile
-An edit accidentally duplicated the `.PHONY` declaration. Removed the duplicate.

@@ -1,4 +1,204 @@
-﻿﻿nopCommerce: free and open-source eCommerce solution
+﻿﻿# OpenTelemetry Instrumentation — Assignment 1
+
+Instrumented fork of nopCommerce 5.00 for Assignment 1 — Observability in the Wild.
+The instrumented flow is **Customer searches and views a product** (Catalogue, Search, Pricing).
+
+---
+
+## Architecture
+
+### Request Flow
+
+Files marked **[NEW]** were created as part of this assignment. Files marked **[CHANGED]** had instrumentation added to existing code.
+
+```mermaid
+flowchart TD
+    Browser(["Browser / load-test.sh"])
+
+    subgraph app ["nopCommerce — ASP.NET Core 9"]
+
+        subgraph framework ["Nop.Web.Framework"]
+            OBS["ObservabilityStartup [NEW]\nOrder = -5, runs before all other startup classes\nRegisters OTel SDK, ASP.NET Core instrumentation,\nHttpClient instrumentation, OTLP HTTP exporter"]
+            PII["PiiSanitizingProcessor [NEW]\nStrips email, card, token, password tags\nfrom every span before it is exported"]
+        end
+
+        subgraph web ["Nop.Web"]
+            CTRL["SearchController\nProductController\n(not changed)"]
+        end
+
+        subgraph services ["Nop.Services"]
+            SEARCH["ProductService [CHANGED]\nSearchProductsAsync\nSpan with search tags\nRecords search result count histogram"]
+            PRICE["PriceCalculationService [CHANGED]\nGetFinalPriceAsync\nSpan with pricing tags\nRecords discount calculations counter"]
+        end
+
+        subgraph core ["Nop.Core"]
+            SRC["NopActivitySource [NEW]\nShared ActivitySource\nNo OTel SDK dependency\nUses System.Diagnostics only"]
+            MET["NopMetrics [NEW]\ncatalog.search.result_count\ncatalog.price.discount_calculations"]
+        end
+
+        subgraph data ["Nop.Data"]
+            REPO["EntityRepository [CHANGED]\nSingle data access chokepoint for all 40+ services\nDB spans on GetById (cache miss only),\nInsert, Update, Delete"]
+        end
+    end
+
+    DB[("MySQL 8.4")]
+
+    Browser -->|"HTTP GET /search\nHTTP GET /product-slug"| CTRL
+    CTRL --> SEARCH
+    CTRL --> PRICE
+    SEARCH --> REPO
+    PRICE --> REPO
+    REPO -->|"LINQ2DB"| DB
+
+    OBS -. "configures" .-> SRC
+    OBS -. "configures" .-> MET
+    SEARCH -. "uses" .-> SRC
+    SEARCH -. "uses" .-> MET
+    PRICE -. "uses" .-> SRC
+    PRICE -. "uses" .-> MET
+    REPO -. "uses" .-> SRC
+    PII -. "filters spans" .-> SRC
+
+    style OBS fill:#1a4a1a,color:#fff
+    style PII fill:#1a4a1a,color:#fff
+    style SRC fill:#1a4a1a,color:#fff
+    style MET fill:#1a4a1a,color:#fff
+    style SEARCH fill:#2a3d10,color:#fff
+    style PRICE fill:#2a3d10,color:#fff
+    style REPO fill:#2a3d10,color:#fff
+```
+
+### Telemetry Pipeline
+
+How signals travel from the application to Grafana.
+
+```mermaid
+flowchart LR
+    subgraph app ["nopCommerce (host machine)"]
+        SDK["OTel SDK\nActivitySource + Meter\nhooks into BCL primitives"]
+        PII2["PiiSanitizingProcessor\nfilters before export"]
+    end
+
+    subgraph docker ["Docker Compose stack"]
+        COL["OTel Collector\nport 4318 — OTLP HTTP/protobuf\nbatches and fans out signals"]
+        JAE["Jaeger\nport 16686\ntrace storage and UI"]
+        PRO["Prometheus\nport 9090\nmetrics storage\nscrapes collector :8889"]
+        GRA["Grafana\nport 3000\ndashboard\nreads Prometheus + Jaeger"]
+    end
+
+    SDK -->|"spans + metrics\nOTLP HTTP"| PII2
+    PII2 -->|"localhost:4318"| COL
+    COL -->|"OTLP gRPC — traces"| JAE
+    COL -->|"Prometheus exposition — metrics"| PRO
+    JAE -->|"trace queries"| GRA
+    PRO -->|"PromQL queries"| GRA
+
+    style COL fill:#1a3a4a,color:#fff
+    style JAE fill:#1a3a4a,color:#fff
+    style PRO fill:#1a3a4a,color:#fff
+    style GRA fill:#1a3a4a,color:#fff
+    style PII2 fill:#1a4a1a,color:#fff
+```
+
+---
+
+## Quick Start
+
+Everything runs with one command from the `AS-nopCommerce/` directory:
+
+```bash
+make all
+```
+
+This starts the Docker observability stack, builds the .NET solution, waits for MySQL, and starts the app.
+
+**URLs once running:**
+
+| Service     | URL                     | Credentials   |
+|-------------|-------------------------|---------------|
+| nopCommerce | http://localhost:5000   |               |
+| Grafana     | http://localhost:3000   | admin / admin |
+| Jaeger      | http://localhost:16686  |               |
+| Prometheus  | http://localhost:9090   |               |
+
+---
+
+## Individual Commands
+
+```bash
+make up             # start Docker stack only
+make build          # restore and build .NET solution
+make run            # start the app (waits for MySQL)
+make loadtest       # run 20-worker load test for 120s
+make logs           # tail all container logs
+make collector-logs # tail OTel Collector logs only
+make down           # stop containers, keep data
+make clean          # stop containers and delete volumes
+```
+
+---
+
+## Load Test
+
+```bash
+make loadtest
+```
+
+Or directly with custom parameters:
+
+```bash
+./load-test.sh [BASE_URL] [DURATION_SECONDS] [CONCURRENCY]
+
+# Examples
+./load-test.sh                              # defaults: localhost:5000, 120s, 20 workers
+./load-test.sh http://localhost:5000 60 5   # lighter run
+```
+
+The script simulates keyword searchers, category browsers, and product page viewers.
+Roughly 30% of product views hit the five products with a discount applied, so the Grafana
+discount rate panel shows a non-zero value under load.
+
+---
+
+## Custom Metrics
+
+**`catalog.search.result_count`** (Histogram, tagged `has_keyword` / `has_category`)
+
+A sustained drop toward zero in this distribution without any HTTP errors is an early signal
+that the search index or ACL configuration is broken. The endpoint returns 200 with an empty
+result set, so error rate alone would not catch this.
+
+**`catalog.price.discount_calculations`** (Counter, tagged `discount_applied`)
+
+During an active promotional campaign, the `discount_applied=true` rate should track with
+product page views. If it drops to zero while a sale is live, the discount configuration is
+broken. This failure is silent from an HTTP perspective — pages load normally, just without
+the expected discount.
+
+---
+
+## Grafana Dashboard
+
+The dashboard is auto-provisioned at startup. Open http://localhost:3000, log in, and the
+nopCommerce dashboard is under Dashboards.
+
+The JSON export lives at `observability/grafana/provisioning/dashboards/nopcommerce.json`.
+
+---
+
+## Documentation
+
+| File | Contents |
+|---|---|
+| `ARCHITECTURE_ANALYSIS.md` | Architectural reading of nopCommerce before instrumentation |
+| `INSTRUMENTATION_CHANGES.md` | Every file changed, with rationale |
+| `CRITIQUE.md` | Architectural assessment — what helped, what did not, what to change |
+
+---
+
+---
+
+# nopCommerce: free and open-source eCommerce solution
 ===========
 
 [nopCommerce](https://www.nopcommerce.com/?utm_source=github&utm_medium=content&utm_campaign=homepage) is the best open-source eCommerce platform. nopCommerce is free, and it is the most popular ASP.NET Core shopping cart.
